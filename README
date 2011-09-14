@@ -1,0 +1,14 @@
+node.js / soda scripts for extracting energy usage data into JSON format
+
+Steps to use:
+-------------
+1) Install soda, node-time
+2) Create config.json file containing your account information
+3) Schedule daily to get your energy data
+4) Store data in your favorite db system
+
+Daily command:
+--------------
+
+# Grabs data from 2 days ago
+node dlSmartSenseScrape.js config.json daysBack 2
