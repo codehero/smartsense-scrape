@@ -46,9 +46,24 @@ function downloadDay(browser, day, cb){
 		"energies":[]
 	};
 
+	var year = parseInt(day.substr(6));
+	var month = parseInt(day.substr(3, 2));
+	var date = parseInt(day.substr(0, 2));
+
+	/* Set the target year. */
 	var chain = browser.chain
-		.type("id=udate", day)
-		.clickAndWait("id=btnSubmit")
+		.click("id=udate")
+		.click("css=select.ui-datepicker-year")
+		.click("css=option[value=\""+ year +"\"]");
+
+	/* Set the target month. */
+	for(var i = 1; i < month; ++i)
+		chain.click("css=span.ui-icon.ui-icon-circle-triangle-w");
+
+
+	/* Generate the table and scrape. */
+	chain.click("link=" + date)
+		.click("id=btnSubmit")
 		.click("link=Show Tabular View")
 		.getText("//div[@id='usageControl_dataDetail']/table/tbody/tr[6]/td[2]", function(text){
 			record.lowTemp = parseFloat(text.split(String.fromCharCode(176))[0]);
@@ -65,8 +80,7 @@ function downloadDay(browser, day, cb){
 
 		for(var i = 0; i < 24; ++i){
 			var str =
-				"//table[@id='mainContent']/tbody/tr[2]/td/div/div/div[3]/div[2]"+
-				"/center/table/tbody/tr["+ (i + 2) +"]/td[2]";
+				"//div[@id='contentContainer']/div[2]/div/div[2]/center/table/tbody/tr["+ (2 + i) + "]/td[2]";
 			chain = chain.getText(str, genClosure(i))
 		}
 
@@ -82,11 +96,19 @@ function downloadDay(browser, day, cb){
 		});
 }
 
-function onEnd(browser, record){
+function onEnd(err, browser, record){
+
+	var ret = 0;
+	if(err){
+		sys.debug(JSON.stringify(err));
+		ret = 1;
+	}
+
 	browser.chain
 		.testComplete()
 		.end(function(err){
 			sys.puts(JSON.stringify(record));
+			process.exit(ret);
 		});
 }
 
@@ -94,44 +116,59 @@ function goToSmartSenseData(browser, cb){
 	browser.chain
 		.session()
 		.open("/")
-		.type("Normal", config.username)
-		.clickAndWait("name=GoButton")
-		.type("error", config.password)
-		.clickAndWait("id=xsub")
+		.type("id=username", config.username)
+		.clickAndWait("id=headerSubmitBtn")
+		.type("id=pass", config.password)
+		.clickAndWait("id=loginbtn")
+		.clickAndWait("css=#home > a")
+		.clickAndWait("css=div.buttonCenter")
+		.clickAndWait("//div[@id='SMARTSENSEPILOTPROGRAM']/ul/li[2]")
+		.clickAndWait("id=HOURLYMETERUSAGEPROFILE")
 		.end(function(err){
-			if(err){
-				cb(err);
-			}
-			else{
-				setTimeout(function(){
-					browser.chain
-						.clickAndWait("link=Smart Sense Pilot Program")
-						.clickAndWait("link=Hourly Meter Usage Profile")
-						.end(cb);
-				}, 3000);
-			}
+			cb(err);
 		});
 }
 
 if(process.argv[3] == "batch"){
-	goToSmartSenseData(gbrowser, function(err){
-		process.stdin.resume();
-		process.stdin.setEncoding("utf8");
-		var buffer = "";
-		process.stdin.on("data",function(chunk){
-			buffer += chunk;
-		});
+	process.stdin.resume();
+	process.stdin.setEncoding("utf8");
+	var buffer = "";
+	process.stdin.on("data",function(chunk){
+		buffer += chunk;
+	});
 
-		process.stdin.on("end",function(chunk){
-			var days = JSON.parse(buffer);
+	process.stdin.on("end",function(chunk){
+		var days = JSON.parse(buffer);
+
+		/* If there is a batch field use that. */
+		if("batch" in days)
+			days = days.batch;
+
+		if(!(days instanceof Array)){
+			throw new Error("Batch format must be an array!");
+		}
+
+		goToSmartSenseData(gbrowser, function(err){
+
+			if(err){
+				onEnd(err, gbrowser, ret);
+				return;
+			}
+
 			var ret = {"batch":[]};
-
 			function doDay(counter){
 				if(counter == days.length){
-					onEnd(gbrowser, ret);
+					onEnd(null, gbrowser, ret);
 				}
 				else{
-					downloadDay(gbrowser, days[counter], function(err, browser, record){
+
+					var datestr = days[counter] + "";
+					datestr = datestr.substr(4, 2) +"/"+ datestr.substr(6, 2) +"/"+ datestr.substr(0,4);
+					downloadDay(gbrowser, datestr, function(err, browser, record){
+						if(err){
+							onEnd(err, gbrowser, ret);
+							return;
+						}
 						ret.batch.push(record);
 						doDay(counter + 1);
 					});
@@ -141,6 +178,7 @@ if(process.argv[3] == "batch"){
 			doDay(0);
 		});
 	});
+
 }
 else if(process.argv[3] == "daysBack"){
 	var back = parseInt(process.argv[4]);
@@ -168,26 +206,20 @@ else if(process.argv[3] == "daysBack"){
 		theDate = theDate.join("/");
 
 		if(err){
-			sys.debug("Encountered error: " + JSON.stringify(err));
-			onEnd(gbrowser, {"err":err});
+			onEnd(err, gbrowser, null);
 		}
 		else{
-			downloadDay(gbrowser, theDate, function(err, browser, record){
-				onEnd(browser, record);
-			});
+			downloadDay(gbrowser, theDate, onEnd);
 		}
 	});
 }
 else if(process.argv[3] == "getDay"){
 	goToSmartSenseData(gbrowser, function(err){
 		if(err){
-			sys.debug("Encountered error: " + JSON.stringify(err));
-			onEnd(gbrowser, {"err":err});
+			onEnd(err, gbrowser, null);
 		}
 		else{
-			downloadDay(gbrowser, process.argv[4], function(err, browser, record){
-				onEnd(browser, record);
-			});
+			downloadDay(gbrowser, process.argv[4], onEnd);
 		}
 	});
 }
